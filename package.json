@@ -1,0 +1,14 @@
+{
+  "name": "turf-care-call-guide",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Guided phone-sales intake for Precision Turf Care. Captures client info during the call for entry into Aspire afterwards.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

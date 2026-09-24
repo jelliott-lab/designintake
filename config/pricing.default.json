@@ -1,0 +1,30 @@
+{
+  "placeholder": true,
+  "note": "PLACEHOLDER PRICES. Replace these with the real numbers from the Aspire kits on the Pricing page before quoting customers.",
+  "programs": {
+    "tc": {
+      "name": "Precision Turf Care",
+      "visits": 7,
+      "perThousand": 5,
+      "minimum": 55
+    },
+    "tcplus": {
+      "name": "Precision Turf Care+",
+      "visits": 11,
+      "perThousand": 5.5,
+      "minimum": 60
+    }
+  },
+  "addOns": [
+    { "id": "aeration", "name": "Aeration (warm season)", "visits": 1, "perThousand": 15, "minimum": 150 },
+    { "id": "aeration_overseed", "name": "Aeration & Overseeding (cool season)", "visits": 1, "perThousand": 30, "minimum": 250 },
+    { "id": "top_dressing", "name": "Top dressing (sand for warm season / topsoil for fescue)", "visits": 1, "perThousand": 40, "minimum": 300 },
+    { "id": "soil_amendment", "name": "Soil amendment program (soil sample + treatment)", "visits": 1, "perThousand": 10, "minimum": 125 },
+    { "id": "mosquito", "name": "Mosquito control", "visits": 7, "perThousand": 0, "minimum": 65 },
+    { "id": "flea_tick", "name": "Flea & tick control", "visits": 4, "perThousand": 3, "minimum": 55 },
+    { "id": "perimeter_pest", "name": "Perimeter pest control", "visits": 4, "perThousand": 0, "minimum": 65 },
+    { "id": "fire_ant", "name": "Fire ant control", "visits": 1, "perThousand": 4, "minimum": 95 },
+    { "id": "grub", "name": "Grub control", "visits": 1, "perThousand": 4, "minimum": 85 },
+    { "id": "army_worm", "name": "Army worm control", "visits": 1, "perThousand": 3, "minimum": 75 }
+  ]
+}
