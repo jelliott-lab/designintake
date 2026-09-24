@@ -17,7 +17,7 @@ Each call runs through 8 steps, following the *Turf Care Programs Sales Process*
 8. **Summary for Aspire**: one-click copy of the full summary, per-field copy buttons, and an "Entered in Aspire" checkbox
 
 Call notes and a live customer card stay on screen the whole time. Everything autosaves to the
-server (with a browser backup if the connection drops), so calls are shared across reps.
+Google Sheet or server (with a browser backup if the connection drops), so calls are shared across reps.
 The **Calls** page lists every call, filtered to "Needs Aspire entry" by default.
 
 Payment info is intentionally **not** collected. Take payment in Aspire.
@@ -37,9 +37,44 @@ unless the rep removes it. Reps can also type an adjusted price.
 > numbers from the Aspire kits on the Pricing page, then uncheck "placeholder prices".
 > Quotes show a warning until you do.
 
-## Running it
+## Hosting on Google (recommended)
 
-Requires Node.js 18+. No dependencies to install.
+The app can run as a **Google Apps Script web app** attached to a Google Sheet. It's free, reps
+sign in with their Precision Google accounts, and every call is saved as a row in the Sheet.
+You need two files from the `apps-script/` folder: `Code.gs` and `Index.html`.
+
+### One-time setup (about 10 minutes)
+
+1. In Google Drive, create a new **Google Sheet** named something like *Turf Care Calls*.
+   Only people you share this Sheet with can open it directly. Reps don't need access to it
+   to use the app.
+2. In the Sheet, open **Extensions → Apps Script**.
+3. In the editor, click `Code.gs`, delete what's there, and paste in the contents of
+   [`apps-script/Code.gs`](apps-script/Code.gs). On GitHub, open the file, click **Raw**,
+   then select all and copy.
+4. Click **+** next to *Files* → **HTML**, name it `Index` (the editor adds `.html`), delete
+   what's there, and paste in the contents of [`apps-script/Index.html`](apps-script/Index.html).
+5. Click the 💾 **Save** icon.
+6. Click **Deploy → New deployment**, click the ⚙️ gear next to *Select type*, and choose **Web app**.
+   - *Execute as:* **Me**
+   - *Who has access:* **Anyone within Precision** (your Google Workspace domain)
+7. Click **Deploy**, then **Authorize access** and allow the permissions. The app only reads and writes this Sheet.
+8. Copy the **Web app URL** and send it to the reps to bookmark.
+
+The first call creates a **Calls** tab in the Sheet. You can sort, filter and read it freely.
+Deleting a row deletes that call. Don't edit the last column (*Call data*); the app reads from it.
+
+### Updating the app later
+
+Paste the new `Code.gs` / `Index.html`, save, then go to **Deploy → Manage deployments →** ✏️ edit
+→ *Version:* **New version** → **Deploy**. The URL stays the same.
+
+Pricing edits made on the app's Pricing page are stored in the script, not the files, so updating
+the code doesn't reset them.
+
+## Running it as a Node server (alternative)
+
+Use this option instead if you'd rather host it yourself. Requires Node.js 18+; there are no dependencies to install.
 
 ```bash
 npm start            # http://localhost:3000
@@ -54,5 +89,8 @@ Environment variables:
 | `DATA_DIR`     | `./data`  | Where `calls.json` and `pricing.json` are stored. Back this folder up. |
 | `APP_PASSCODE` | *(none)*  | If set, the browser asks for this passcode (any username). **Set this whenever the app is reachable outside your office network.** It holds customer names, addresses and phone numbers. |
 
-Host it anywhere that runs Node and keeps a persistent disk (an office PC or server, Render,
-Railway, Fly.io, a small VPS, etc.) so every rep uses the same URL and sees the same calls.
+## For developers
+
+`public/` is the single source for the front end. After changing anything in `public/` or
+`config/pricing.default.json`, run `npm run build:apps-script` to regenerate
+`apps-script/Index.html` and the default pricing in `apps-script/Code.gs`. `npm test` fails if you forget.
