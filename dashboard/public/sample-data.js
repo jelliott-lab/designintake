@@ -29,7 +29,8 @@
         const lag = Math.floor(rand() * 3);
         const cm = new Date(y, m - 1 + lag, 1 + Math.floor(rand() * 27));
         const closedStr = `${cm.getFullYear()}-${pad(cm.getMonth() + 1)}-${pad(cm.getDate())}`;
-        const big = rand() < 0.15;
+        const jobType = pick([['Landscape Design & Install', 32], ['Maintenance & Gardening', 17], ['Enhancement', 16], ['Lawn Care', 14], ['Plant Health Care', 2], ['Irrigation Services', 5], ['Exterior Pest Control', 2], ['', 12]]);
+        const big = jobType === 'Landscape Design & Install' && rand() < 0.4;
         deals.push({
           id: `sample-${id++}`,
           name: `Sample project ${id}`,
@@ -40,7 +41,9 @@
           amount: Math.round(big ? 40000 + rand() * 120000 : 2500 + rand() * 18000),
           source,
           sourceLabel: '',
-          pipeline: rand() < 0.15 ? 'Lawn Care Pipeline' : 'Official Sales Pipeline',
+          pipeline: jobType === 'Lawn Care' && rand() < 0.5 ? 'Lawn Care Pipeline' : 'Official Sales Pipeline',
+          traffic: source ? '' : pick([['OFFLINE', 75], ['DIRECT_TRAFFIC', 10], ['', 10], ['PAID_SEARCH', 3], ['ORGANIC_SEARCH', 2]]),
+          jobType,
         });
       }
     }

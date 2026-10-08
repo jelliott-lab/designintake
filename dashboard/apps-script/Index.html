@@ -179,7 +179,7 @@ main > *, .grid-2 > *, .grid-3 > *, .stack > * { min-width: 0; }
 
 /* ---- KPI tiles ---- */
 .kpis-hero { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
-.kpis-small { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.kpis-small { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
 @media (max-width: 1000px) { .kpis-hero { grid-template-columns: repeat(2, 1fr); } .kpis-small { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 560px) { .kpis-hero, .kpis-small { grid-template-columns: 1fr 1fr; } }
 .kpi { position: relative; overflow: hidden; }
@@ -262,6 +262,14 @@ table.channels thead th[aria-sort="ascending"]::after { content: " ↑"; }
 table.channels tbody td { font-variant-numeric: tabular-nums; }
 table.channels tbody tr:hover { background: var(--surface-2); }
 table.channels tfoot td { font-weight: 700; border-bottom: 0; }
+table.lines thead th { cursor: default; }
+table.lines tr.clickable { cursor: pointer; }
+table.lines tr.clickable:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+table.lines tr.selected { background: var(--green-soft); }
+table.lines tr.selected .ch-name::after { content: " ✓"; color: var(--good); }
+.kpi.gap { background: var(--warn-bg); border-color: var(--warn-border); }
+.kpi.gap .label, .kpi.gap .delta.flat { color: var(--warn-text); }
+.kpi.gap .delta { white-space: normal; }
 .ch-name { font-weight: 600; }
 .ch-note { display: block; font-size: .76rem; color: var(--muted); font-weight: 400; }
 .rev-cell { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
@@ -320,6 +328,10 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
         <select id="toMonth"></select>
       </label>
       <label class="field">
+        <span>Service line</span>
+        <select id="serviceLine"><option value="all">All service lines</option></select>
+      </label>
+      <label class="field">
         <span>Pipeline</span>
         <select id="pipeline"><option value="all">All pipelines</option></select>
       </label>
@@ -331,8 +343,8 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
         </div>
       </div>
       <label class="check">
-        <input type="checkbox" id="includeUnknown" checked>
-        <span>Include referral / no-source leads</span>
+        <input type="checkbox" id="includeUnknown">
+        <span>Include referral / no-source deals</span>
       </label>
     </form>
   </header>
@@ -342,7 +354,8 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
   </main>
 
   <footer class="foot">
-    Leads = HubSpot deals created. Jobs = Closed Won deals with an Aspire Opportunity #. Revenue = HubSpot deal amount on those jobs.
+    Leads = HubSpot deals created. Channel = “Known lead source”, or the original traffic source (paid search, organic search, social) when that's blank.
+    Jobs = Closed Won deals with an Aspire Opportunity #. Revenue = HubSpot deal amount on those jobs. Service line = “Type of Job”.
     Spend = QuickBooks transactions on the advertising sheet (budget where no actuals yet).
   </footer>
   <script>
@@ -358,6 +371,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
   //  - budgetItems: row names on the spend sheet's budget tab
   //  - vendors:     regexes matched against QuickBooks transaction Name/Num/Description
   //  - windsor:     Windsor.ai data source ids (optional)
+  //  - traffic:     HubSpot "Original Traffic Source" values used when Known lead source is blank
   // Spend that matches nothing lands in the channel marked defaultSpend; leads whose source
   // matches nothing land in the channel marked defaultLeads.
   const DEFAULT_CHANNELS = [
@@ -367,12 +381,14 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       budgetItems: ['Google PPC Ads', 'Google Local Service Ads'],
       vendors: ['google\\s*\\*?\\s*ads'],
       windsor: ['google_ads'],
+      traffic: ['PAID_SEARCH'],
     },
     {
       id: 'seo', name: 'SEO & website',
       leadSources: ['organic', 'Organic', 'WordPress Site'],
       budgetItems: ['Landscape Leadership'],
       vendors: ['landscape leadership', 'godaddy'],
+      traffic: ['ORGANIC_SEARCH'],
     },
     {
       id: 'shows', name: 'Home & Garden Show',
@@ -386,6 +402,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       budgetItems: ['Social Media Boosts'],
       vendors: ['\\bmeta\\b', 'facebook', 'facebk', 'instagram'],
       windsor: ['facebook'],
+      traffic: ['PAID_SOCIAL', 'SOCIAL_MEDIA'],
     },
     {
       id: 'print', name: 'Direct mail & print',
@@ -404,6 +421,17 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       leadSources: [''],
       defaultLeads: true,
     },
+  ];
+
+  // Service lines group HubSpot "Type of Job" values. Deals with no Type of Job land in the
+  // line marked defaultLine.
+  const DEFAULT_SERVICE_LINES = [
+    { id: 'design', name: 'Design & build', jobTypes: ['Landscape Design & Install'] },
+    { id: 'enhance', name: 'Enhancements', jobTypes: ['Enhancement'] },
+    { id: 'maint', name: 'Maintenance & gardening', jobTypes: ['Maintenance & Gardening'] },
+    { id: 'lpc', name: 'Lawn & plant care (LPC)', jobTypes: ['Lawn Care', 'Plant Health Care', 'Exterior Pest Control'] },
+    { id: 'irrigation', name: 'Irrigation', jobTypes: ['Irrigation Services'] },
+    { id: 'none', name: 'Type of job not set', jobTypes: [''], defaultLine: true },
   ];
 
   const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -474,6 +502,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     const bySource = {};
     const byItem = {};
     const byWindsor = {};
+    const byTraffic = {};
     const vendorRules = [];
     let defaultSpend = null;
     let defaultLeads = null;
@@ -481,6 +510,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       (c.leadSources || []).forEach((s) => { bySource[norm(s)] = c.id; });
       (c.budgetItems || []).forEach((s) => { byItem[norm(s)] = c.id; });
       (c.windsor || []).forEach((s) => { byWindsor[norm(s)] = c.id; });
+      (c.traffic || []).forEach((s) => { byTraffic[norm(s)] = c.id; });
       (c.vendors || []).forEach((re) => vendorRules.push({ re: new RegExp(re, 'i'), id: c.id }));
       if (c.defaultSpend) defaultSpend = c.id;
       if (c.defaultLeads) defaultLeads = c.id;
@@ -490,12 +520,41 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     return {
       channels,
       byId: Object.fromEntries(channels.map((c) => [c.id, c])),
+      defaultLeads,
       forSource: (value, label) => bySource[norm(value)] || bySource[norm(label)] || defaultLeads,
+      // Known lead source first; when it's blank, fall back to the original traffic source.
+      attribute(deal) {
+        const known = bySource[norm(deal.source)] || bySource[norm(deal.sourceLabel)];
+        if (known && known !== defaultLeads) return { id: known, viaTraffic: false };
+        if (!norm(deal.source)) {
+          const t = byTraffic[norm(deal.traffic)];
+          if (t) return { id: t, viaTraffic: true };
+        }
+        return { id: known || defaultLeads, viaTraffic: false };
+      },
       forItem: (item) => byItem[norm(item)] || defaultSpend,
       forWindsor: (src) => byWindsor[norm(src)] || null,
       forVendor(text) {
         const hit = vendorRules.find((r) => r.re.test(text));
         return hit ? hit.id : defaultSpend;
+      },
+    };
+  }
+
+  function makeLineIndex(lines) {
+    lines = lines || DEFAULT_SERVICE_LINES;
+    const byType = {};
+    lines.forEach((l) => (l.jobTypes || []).forEach((t) => { byType[norm(t)] = l.id; }));
+    const fallback = (lines.find((l) => l.defaultLine) || lines[lines.length - 1]).id;
+    const order = lines.map((l) => l.id);
+    return {
+      lines,
+      // "Type of Job" is multi-select ("A;B"). A deal counts once, under whichever of its types
+      // comes first in the service line list, so revenue is never double-counted.
+      forType(jobType) {
+        const ids = String(jobType || '').split(';').map((t) => byType[norm(t)]).filter(Boolean);
+        if (!ids.length) return fallback;
+        return ids.sort((x, y) => order.indexOf(x) - order.indexOf(y))[0];
       },
     };
   }
@@ -666,47 +725,89 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
 
   const safeDiv = (a, b) => (b ? a / b : null);
 
-  // opts: { from, to, pipeline ('all' or name), basis ('cohort' | 'closed'),
-  //         includeUnknown (count leads with no source), channels }
+  // opts: { from, to, pipeline ('all' or name), serviceLine ('all' or id), basis ('cohort' | 'closed'),
+  //         includeUnknown (count deals with no lead source), channels, serviceLines }
+  //
+  // Spend isn't tagged by pipeline or service line, so when either filter is set each channel's
+  // spend for a month is split by that channel's share of the month's leads (overhead and
+  // lead-less channels by the month's overall share). Those figures come back with allocated: true.
   function summarize(data, opts) {
     const idx = makeChannelIndex(opts.channels || (data.config && data.config.channels));
+    const lineIdx = makeLineIndex(opts.serviceLines || (data.config && data.config.serviceLines));
     const months = monthRange(opts.from, opts.to);
     const inRange = (m) => m && m >= opts.from && m <= opts.to;
     const spendByMonth = data.spendByMonth || buildSpend(data.workbook, { index: idx, windsor: data.windsor });
-    const deals = (data.deals || []).filter((d) => !opts.pipeline || opts.pipeline === 'all' || d.pipeline === opts.pipeline);
-    const unknownId = idx.channels.find((c) => c.defaultLeads).id;
+    const unknownId = idx.defaultLeads;
+    const byPipeline = !opts.pipeline || opts.pipeline === 'all';
+    const byLine = !opts.serviceLine || opts.serviceLine === 'all';
+    const matches = (d) => (byPipeline || d.pipeline === opts.pipeline) && (byLine || lineIdx.forType(d.jobType) === opts.serviceLine);
+    const allocated = !byPipeline || !byLine;
 
-    const blank = () => ({ spend: 0, leads: 0, jobs: 0, revenue: 0, wonNoAspire: 0 });
+    const all = (data.deals || []).map((d) => {
+      const a = idx.attribute(d);
+      return { d, ch: a.id, viaTraffic: a.viaTraffic, created: monthOf(d.created), closed: monthOf(d.closed), keep: matches(d) };
+    });
+
+    const blank = () => ({ spend: 0, leads: 0, jobs: 0, revenue: 0, wonNoAspire: 0, viaTraffic: 0 });
     const byChannel = Object.fromEntries(idx.channels.map((c) => [c.id, blank()]));
     const byMonth = Object.fromEntries(months.map((m) => [m, blank()]));
     const total = blank();
+    const unattributed = { leads: 0, jobs: 0, revenue: 0 };
+    let allRevenue = 0;
     const missingAspire = [];
+
+    // Lead counts per month × channel, all deals vs. the filtered slice, for spend allocation.
+    const share = {};
+    if (allocated) {
+      all.forEach((x) => {
+        if (!inRange(x.created)) return;
+        const k = x.created;
+        const r = share[k] || (share[k] = { all: 0, mine: 0, ch: {} });
+        const c = r.ch[x.ch] || (r.ch[x.ch] = { all: 0, mine: 0 });
+        r.all++; c.all++;
+        if (x.keep) { r.mine++; c.mine++; }
+      });
+    }
+    const spendShare = (m, id) => {
+      if (!allocated) return 1;
+      const r = share[m];
+      if (!r || !r.all) return 0;
+      const c = r.ch[id];
+      return c && c.all ? c.mine / c.all : r.mine / r.all;
+    };
 
     months.forEach((m) => {
       const rec = spendByMonth[m];
       if (!rec) return;
       Object.entries(rec.byChannel).forEach(([id, amt]) => {
+        const v = amt * spendShare(m, id);
         if (!byChannel[id]) byChannel[id] = blank();
-        byChannel[id].spend += amt;
-        byMonth[m].spend += amt;
-        total.spend += amt;
+        byChannel[id].spend += v;
+        byMonth[m].spend += v;
+        total.spend += v;
       });
     });
 
-    deals.forEach((d) => {
-      const ch = idx.forSource(d.source, d.sourceLabel);
+    all.forEach(({ d, ch, viaTraffic, created, closed, keep }) => {
+      if (!keep) return;
       const counted = opts.includeUnknown !== false || ch !== unknownId;
-      const created = monthOf(d.created);
-      const closed = monthOf(d.closed);
-      if (inRange(created) && counted) {
+      const revMonth = opts.basis === 'closed' ? closed : created;
+      const job = d.won && isJob(d) && inRange(revMonth);
+      const amt = Number(d.amount) || 0;
+      if (ch === unknownId) {
+        if (inRange(created)) unattributed.leads++;
+        if (job) { unattributed.jobs++; unattributed.revenue += amt; }
+      }
+      if (job) allRevenue += amt;
+      if (!counted) return;
+      if (inRange(created)) {
         byChannel[ch].leads++;
         byMonth[created].leads++;
         total.leads++;
+        if (viaTraffic) { byChannel[ch].viaTraffic++; total.viaTraffic++; }
       }
-      const revMonth = opts.basis === 'closed' ? closed : created;
-      if (d.won && inRange(revMonth) && counted) {
-        if (isJob(d)) {
-          const amt = Number(d.amount) || 0;
+      if (d.won && inRange(revMonth)) {
+        if (job) {
           byChannel[ch].jobs++; byChannel[ch].revenue += amt;
           byMonth[revMonth].jobs++; byMonth[revMonth].revenue += amt;
           total.jobs++; total.revenue += amt;
@@ -722,26 +823,23 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       cpl: r.spend ? safeDiv(r.spend, r.leads) : null,
       costPerJob: r.spend ? safeDiv(r.spend, r.jobs) : null,
       closeRate: safeDiv(r.jobs, r.leads),
+      avgJob: safeDiv(r.revenue, r.jobs),
       roi: r.spend ? (r.revenue - r.spend) / r.spend : null,
-      roas: safeDiv(r.revenue, r.spend),
+      roas: r.spend ? safeDiv(r.revenue, r.spend) : null,
     });
     derive(total);
     Object.values(byChannel).forEach(derive);
     Object.values(byMonth).forEach(derive);
+    unattributed.share = safeDiv(unattributed.revenue, allRevenue);
 
-    const basisCounts = { actual: 0, partial: 0, budget: 0, none: 0 };
-    const estimatedMonths = [];
-    months.forEach((m) => {
-      const rec = spendByMonth[m];
-      const b = rec ? rec.basis : 'none';
-      basisCounts[b]++;
-      if (b !== 'actual') estimatedMonths.push(m);
-    });
+    const estimatedMonths = months.filter((m) => !spendByMonth[m] || spendByMonth[m].basis !== 'actual');
 
     return {
       months,
       total,
       byMonth,
+      allocated,
+      unattributed,
       channels: idx.channels
         .filter((c) => opts.includeUnknown !== false || c.id !== unknownId)
         .map((c) => Object.assign({ id: c.id, name: c.name, overhead: !c.leadSources }, byChannel[c.id])),
@@ -749,6 +847,18 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       estimatedMonths,
       missingAspire: missingAspire.sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)),
     };
+  }
+
+  // One summary per service line (same period and filters), for the service line table.
+  function summarizeServiceLines(data, opts) {
+    const lineIdx = makeLineIndex(opts.serviceLines || (data.config && data.config.serviceLines));
+    return lineIdx.lines.map((l) => {
+      const s = summarize(data, Object.assign({}, opts, { serviceLine: l.id }));
+      const inc = opts.includeUnknown !== false;
+      const allLeads = inc ? s.total.leads : s.total.leads + s.unattributed.leads;
+      const marketingShare = safeDiv(allLeads - s.unattributed.leads, allLeads);
+      return Object.assign({ id: l.id, name: l.name, marketingShare, unattributed: s.unattributed }, s.total);
+    });
   }
 
   // Previous period of the same length, for the deltas on the KPI tiles.
@@ -794,6 +904,9 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
 
   return {
     DEFAULT_CHANNELS,
+    DEFAULT_SERVICE_LINES,
+    makeLineIndex,
+    summarizeServiceLines,
     parseMoney,
     monthOf,
     addMonths,
@@ -1024,8 +1137,10 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     from: null,
     to: null,
     pipeline: 'all',
+    serviceLine: 'all',
+    serviceLines: null,
     basis: 'cohort',
-    includeUnknown: true,
+    includeUnknown: false,
     sort: { key: 'revenue', dir: -1 },
   };
 
@@ -1077,6 +1192,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
   function prepare(data) {
     state.data = data;
     state.channels = (data.config && data.config.channels) || M.DEFAULT_CHANNELS;
+    state.serviceLines = (data.config && data.config.serviceLines) || M.DEFAULT_SERVICE_LINES;
     const workbook = data.workbook || M.parseSpendWorkbook(data.spendTabs || [], { year: data.year, budgetTab: data.budgetTab });
     state.spendByMonth = data.spendByMonth || M.buildSpend(workbook, { channels: state.channels, windsor: data.windsor });
     if (!workbook.budget.length && !Object.keys(workbook.transactions).length && !data.spendByMonth) {
@@ -1106,6 +1222,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     const pipes = [...new Set((d.pipelines && d.pipelines.length ? d.pipelines : d.deals.map((x) => x.pipeline)).filter(Boolean))];
     $('#pipeline').innerHTML = '<option value="all">All pipelines</option>' + pipes.map((p) => `<option>${esc(p)}</option>`).join('');
     $('#pipeline').closest('.field').hidden = pipes.length < 2;
+    $('#serviceLine').innerHTML = '<option value="all">All service lines</option>' + state.serviceLines.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
     applyPeriod(state.period);
     syncControls();
     if (filtersReady) return;
@@ -1115,6 +1232,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     $('#fromMonth').addEventListener('change', (e) => { state.from = e.target.value; if (state.to < state.from) state.to = state.from; syncControls(); render(); });
     $('#toMonth').addEventListener('change', (e) => { state.to = e.target.value; if (state.from > state.to) state.from = state.to; syncControls(); render(); });
     $('#pipeline').addEventListener('change', (e) => { state.pipeline = e.target.value; render(); });
+    $('#serviceLine').addEventListener('change', (e) => { state.serviceLine = e.target.value; render(); });
     $('#includeUnknown').addEventListener('change', (e) => { state.includeUnknown = e.target.checked; render(); });
     document.querySelectorAll('.segmented button').forEach((b) => b.addEventListener('click', () => {
       state.basis = b.dataset.basis; syncControls(); render();
@@ -1138,6 +1256,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     $('#fromMonth').value = state.from;
     $('#toMonth').value = state.to;
     $('#pipeline').value = state.pipeline;
+    $('#serviceLine').value = state.serviceLine;
     $('#includeUnknown').checked = state.includeUnknown;
     document.querySelectorAll('.segmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.basis === state.basis)));
   }
@@ -1145,11 +1264,14 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
   // ---- render ----
   let lastSummary = null;
 
+  const summaryData = () => ({ deals: state.data.deals, spendByMonth: state.spendByMonth, config: { channels: state.channels, serviceLines: state.serviceLines } });
+  const summaryOpts = (from, to) => ({
+    from, to, pipeline: state.pipeline, serviceLine: state.serviceLine, basis: state.basis,
+    includeUnknown: state.includeUnknown, channels: state.channels, serviceLines: state.serviceLines,
+  });
+
   function summarize(from, to) {
-    return M.summarize(
-      { deals: state.data.deals, spendByMonth: state.spendByMonth, config: { channels: state.channels } },
-      { from, to, pipeline: state.pipeline, basis: state.basis, includeUnknown: state.includeUnknown, channels: state.channels },
-    );
+    return M.summarize(summaryData(), summaryOpts(from, to));
   }
 
   function periodName(from, to) {
@@ -1194,6 +1316,12 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
         </div>
         <div class="table-wrap">${channelTable(s)}</div>
       </section>
+      <section class="card">
+        <div class="card-head">
+          <div><h2>Service lines</h2><div class="sub">From HubSpot “Type of Job”. Spend isn't tagged by service line, so it's split by each channel's share of leads (estimate). Click a row to filter the dashboard.</div></div>
+        </div>
+        <div class="table-wrap">${serviceLineTable()}</div>
+      </section>
       <section class="grid-3">
         <div class="card">
           <div class="card-head"><div><h2>Website traffic</h2><div class="sub">HubSpot tracking, by traffic source</div></div></div>
@@ -1211,7 +1339,12 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       <section class="card">${spendDetailHtml(s)}</section>
     `;
 
-    app.querySelectorAll('table.channels thead th[data-key]').forEach((th) => th.addEventListener('click', () => {
+    app.querySelectorAll('tr[data-line]').forEach((tr) => {
+      const pick = () => { state.serviceLine = state.serviceLine === tr.dataset.line ? 'all' : tr.dataset.line; syncControls(); render(); };
+      tr.addEventListener('click', pick);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
+    app.querySelectorAll('table.channels:not(.lines) thead th[data-key]').forEach((th) => th.addEventListener('click', () => {
       const k = th.dataset.key;
       state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : (k === 'name' || k === 'cpl' || k === 'costPerJob' ? 1 : -1) };
       render();
@@ -1225,6 +1358,10 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     if (s.estimatedMonths.length) {
       const names = s.estimatedMonths.map((m) => M.monthLabel(m)).join(', ');
       items.push(`No actual spend recorded yet for ${names}: those months use the budget column, so CPL and ROI there are estimates.`);
+    }
+    if (s.allocated) {
+      const what = [state.serviceLine !== 'all' && (state.serviceLines.find((l) => l.id === state.serviceLine) || {}).name, state.pipeline !== 'all' && state.pipeline].filter(Boolean).join(' · ');
+      items.push(`Filtered to ${what}. Spend isn't tagged by service line or pipeline, so it's estimated by splitting each channel's spend by its share of leads.`);
     }
     if (!items.length) return '';
     return `<div class="notice-list">${items.map((t) => `<div class="notice"><span class="icon">!</span><div>${esc(t)}</div></div>`).join('')}</div>`;
@@ -1243,11 +1380,11 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
 
   function heroKpis(s, p) {
     const t = s.total;
-    const est = s.estimatedMonths.length ? '<span class="est">est.</span>' : '';
+    const est = s.estimatedMonths.length || s.allocated ? '<span class="est">est.</span>' : '';
     return [
       { label: 'Cost per lead', value: money(t.cpl), est, d: delta(t.cpl, p && p.total.cpl, true), note: `${int(t.leads)} leads` },
       { label: 'Marketing ROI', value: roiText(t.roi), est, d: delta(t.roi, p && p.total.roi, false, 'pts'), note: `${roas(t.roas)} return on ad spend` },
-      { label: 'Job revenue', value: moneyShort(t.revenue), d: delta(t.revenue, p && p.total.revenue), note: `${int(t.jobs)} jobs with an Aspire #` },
+      { label: state.includeUnknown ? 'Job revenue' : 'Marketing job revenue', value: moneyShort(t.revenue), d: delta(t.revenue, p && p.total.revenue), note: `${int(t.jobs)} jobs with an Aspire #` },
       { label: 'Marketing spend', value: moneyShort(t.spend), est, d: delta(t.spend, p && p.total.spend, true), note: money(t.spend) },
     ].map((k) => `
       <div class="card kpi accent">
@@ -1265,9 +1402,13 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
       { label: 'Jobs closed', value: int(t.jobs), d: delta(t.jobs, p && p.total.jobs) },
       { label: 'Lead → job rate', value: pct(t.closeRate, 1), d: delta(t.closeRate, p && p.total.closeRate, false, 'pts') },
       { label: 'Cost per job', value: money(t.costPerJob), d: delta(t.costPerJob, p && p.total.costPerJob, true) },
-      { label: 'Avg job value', value: money(t.jobs ? t.revenue / t.jobs : null), d: delta(t.jobs ? t.revenue / t.jobs : null, p && p.total.jobs ? p.total.revenue / p.total.jobs : null) },
+      { label: 'Avg job value', value: money(t.avgJob), d: delta(t.avgJob, p && p.total.avgJob) },
+      {
+        label: 'Revenue with no lead source', cls: 'gap', value: moneyShort(s.unattributed.revenue),
+        d: `<span class="delta flat">${pct(s.unattributed.share)} of all job revenue · ${int(s.unattributed.jobs)} jobs</span>`,
+      },
     ].map((k) => `
-      <div class="card kpi">
+      <div class="card kpi ${k.cls || ''}">
         <div class="label">${k.label}</div>
         <div class="value num">${k.value}</div>
         <div>${k.d}</div>
@@ -1338,7 +1479,7 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
     const th = cols.map(([key, label]) => `<th data-key="${key}" ${key === k ? `aria-sort="${state.sort.dir < 0 ? 'descending' : 'ascending'}"` : ''}>${label}</th>`).join('');
     const body = rows.map((c) => `
       <tr>
-        <td><span class="ch-name">${esc(c.name)}</span>${notes[c.id] ? `<span class="ch-note">${notes[c.id]}</span>` : ''}${c.wonNoAspire ? `<span class="ch-note">+${c.wonNoAspire} won without Aspire #</span>` : ''}</td>
+        <td><span class="ch-name">${esc(c.name)}</span>${notes[c.id] ? `<span class="ch-note">${notes[c.id]}</span>` : ''}${c.viaTraffic ? `<span class="ch-note">incl. ${c.viaTraffic} credited by website traffic source</span>` : ''}${c.wonNoAspire ? `<span class="ch-note">+${c.wonNoAspire} won without Aspire #</span>` : ''}</td>
         <td>${c.spend ? money(c.spend) : '—'}</td>
         <td>${c.overhead ? '—' : int(c.leads)}</td>
         <td>${c.cpl == null ? '—' : money(c.cpl)}</td>
@@ -1356,6 +1497,28 @@ details.spend-detail td.num, details.spend-detail th.num { text-align: right; }
         <td>Total</td><td>${money(t.spend)}</td><td>${int(t.leads)}</td><td>${money(t.cpl)}</td><td>${int(t.jobs)}</td>
         <td>${pct(t.closeRate, 1)}</td><td>${money(t.costPerJob)}</td><td>${money(t.revenue)}</td><td>${roiPill(t.roi)}</td>
       </tr></tfoot>
+    </table>`;
+  }
+
+  function serviceLineTable() {
+    const lines = M.summarizeServiceLines(summaryData(), Object.assign(summaryOpts(state.from, state.to), { serviceLine: 'all' }));
+    const maxRev = Math.max(1, ...lines.map((l) => l.revenue));
+    const body = lines.map((l) => `
+      <tr data-line="${esc(l.id)}" tabindex="0" class="clickable${state.serviceLine === l.id ? ' selected' : ''}" aria-pressed="${state.serviceLine === l.id}">
+        <td><span class="ch-name">${esc(l.name)}</span>${l.id === 'none' ? '<span class="ch-note">Deals with no “Type of Job”</span>' : ''}</td>
+        <td>${int(l.leads)}</td>
+        <td>${pct(l.marketingShare)}</td>
+        <td>${int(l.jobs)}</td>
+        <td>${pct(l.closeRate, 1)}</td>
+        <td>${money(l.avgJob)}</td>
+        <td><div class="rev-cell">${money(l.revenue)}<span class="rev-bar" aria-hidden="true"><span style="width:${(l.revenue / maxRev * 100).toFixed(1)}%"></span></span></div></td>
+        <td>${l.spend ? money(l.spend) : '—'}</td>
+        <td>${l.cpl == null ? '—' : money(l.cpl)}</td>
+        <td>${l.spend ? roiPill(l.roi) : '<span class="pill flat">—</span>'}</td>
+      </tr>`).join('');
+    return `<table class="channels lines">
+      <thead><tr><th>Service line</th><th>Leads</th><th title="Share of all deals in this line that have a lead source (or a paid/organic traffic source)">Has lead source</th><th>Jobs</th><th>Lead → job</th><th>Avg job</th><th>Job revenue</th><th>Est. spend</th><th>Est. cost / lead</th><th>Est. ROI</th></tr></thead>
+      <tbody>${body}</tbody>
     </table>`;
   }
 

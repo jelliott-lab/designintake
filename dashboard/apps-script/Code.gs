@@ -29,11 +29,14 @@ var CONFIG = {
   // Social media, Direct mail & print, Tools & other, Referral / no source). To change how spend
   // or lead sources roll up into channels, copy Metrics.DEFAULT_CHANNELS here and edit it.
   channels: null,
+  // Likewise for service lines (HubSpot "Type of Job" → Design & build, Enhancements, Maintenance
+  // & gardening, Lawn & plant care, Irrigation): copy Metrics.DEFAULT_SERVICE_LINES here to change.
+  serviceLines: null,
 };
 
 var DEAL_PROPS = [
   'dealname', 'createdate', 'closedate', 'hs_is_closed_won', 'aspire_opportunity',
-  'amount_in_home_currency', 'known_lead_source', 'pipeline',
+  'amount_in_home_currency', 'known_lead_source', 'pipeline', 'hs_analytics_source', 'type_of_job',
 ];
 
 function doGet() {
@@ -65,7 +68,7 @@ function collect_() {
     currentMonth: Utilities.formatDate(now, tz, 'yyyy-MM'),
     year: CONFIG.year,
     budgetTab: CONFIG.budgetTab,
-    config: { channels: CONFIG.channels },
+    config: { channels: CONFIG.channels, serviceLines: CONFIG.serviceLines },
     portalId: CONFIG.portalId,
     deals: [],
     pipelines: [],
@@ -96,6 +99,8 @@ function collect_() {
           source: p.known_lead_source || '',
           sourceLabel: labels[p.known_lead_source] || p.known_lead_source || '',
           pipeline: pipelines[p.pipeline] || p.pipeline || '',
+          traffic: p.hs_analytics_source || '',
+          jobType: p.type_of_job || '',
         };
       });
     });

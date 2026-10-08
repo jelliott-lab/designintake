@@ -39,6 +39,10 @@
         <select id="toMonth"></select>
       </label>
       <label class="field">
+        <span>Service line</span>
+        <select id="serviceLine"><option value="all">All service lines</option></select>
+      </label>
+      <label class="field">
         <span>Pipeline</span>
         <select id="pipeline"><option value="all">All pipelines</option></select>
       </label>
@@ -50,8 +54,8 @@
         </div>
       </div>
       <label class="check">
-        <input type="checkbox" id="includeUnknown" checked>
-        <span>Include referral / no-source leads</span>
+        <input type="checkbox" id="includeUnknown">
+        <span>Include referral / no-source deals</span>
       </label>
     </form>
   </header>
@@ -61,7 +65,8 @@
   </main>
 
   <footer class="foot">
-    Leads = HubSpot deals created. Jobs = Closed Won deals with an Aspire Opportunity #. Revenue = HubSpot deal amount on those jobs.
+    Leads = HubSpot deals created. Channel = “Known lead source”, or the original traffic source (paid search, organic search, social) when that's blank.
+    Jobs = Closed Won deals with an Aspire Opportunity #. Revenue = HubSpot deal amount on those jobs. Service line = “Type of Job”.
     Spend = QuickBooks transactions on the advertising sheet (budget where no actuals yet).
   </footer>
 

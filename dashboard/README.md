@@ -5,7 +5,7 @@ by month and by channel, in the company greens.
 
 | Source | What it provides |
 |---|---|
-| **HubSpot deals** | Leads (deals created), lead source (*Known lead source*), pipeline, Closed Won, amount |
+| **HubSpot deals** | Leads (deals created), lead source (*Known lead source*, else *Original Traffic Source*), service line (*Type of Job*), pipeline, Closed Won, amount |
 | **Aspire # on the HubSpot deal** | A deal counts as a **job** only when it's Closed Won *and* has an *Aspire Opportunity #* |
 | **HubSpot website analytics** | Sessions and new contacts by traffic source |
 | **"2026 Advertising Spend by Month" Google Sheet** | Spend: QuickBooks transaction tabs (one per month), else the *Actual* column on *2026 Budget*, else the *Budget* column (shown as an estimate) |
@@ -22,8 +22,13 @@ by month and by channel, in the company greens.
   - *Lead month* (default) credits a job to the month its lead came in, so it answers "what did
     this month's marketing produce?". Recent months keep filling in as deals close.
   - *Close month* credits a job to the month it was won.
-- **Include referral / no-source leads**: deals with no *Known lead source* (referrals, repeat
-  clients, walk-ins). Turn this off to see CPL and ROI for marketing-sourced leads only.
+- **Include referral / no-source deals** (off by default): deals with no lead source, mostly
+  referrals, repeat clients and imported contacts. While it's off, the headline CPL and ROI cover
+  marketing-sourced deals only. The **Revenue with no lead source** tile always shows how much job
+  revenue has no source, so the attribution gap stays visible.
+- **Lead source fallback**: when *Known lead source* is blank, the deal's *Original Traffic Source*
+  is used for paid search (Google Ads), organic search (SEO & website) and social. The channel
+  table notes how many deals were credited this way.
 - The default period is **year to date through last month**. A half-finished month has spend but
   not many leads yet, which skews CPL.
 
@@ -45,6 +50,27 @@ Spend lines and lead sources roll up into channels (defined in `public/metrics.j
 It has no leads of its own. To move a vendor or lead source, edit the lists in `metrics.js`, or copy
 `DEFAULT_CHANNELS` into `CONFIG.channels` in `Code.gs`. Open **Where the spend numbers come from**
 at the bottom of the dashboard to see which vendor landed in which channel.
+
+### Service lines
+
+*Type of Job* rolls up into service lines (`DEFAULT_SERVICE_LINES` in `metrics.js`):
+
+| Service line | Type of Job values |
+|---|---|
+| Design & build | Landscape Design & Install |
+| Enhancements | Enhancement |
+| Maintenance & gardening | Maintenance & Gardening |
+| Lawn & plant care (LPC) | Lawn Care, Plant Health Care, Exterior Pest Control |
+| Irrigation | Irrigation Services |
+| Type of job not set | (blank) |
+
+*Type of Job* is multi-select. A deal with several types counts once, under the first matching
+line in the order above, so revenue isn't double-counted.
+
+Spend isn't tagged by service line. When you filter to a service line (or a pipeline), each
+channel's monthly spend is split by that channel's share of the month's leads. Overhead such as
+HubSpot and CallRail is split by the overall lead share. Those figures are marked **est.** For exact
+numbers, tag Google Ads campaigns by service line and pull them through Windsor.
 
 ## Setup (about 15 minutes)
 

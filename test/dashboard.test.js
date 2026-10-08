@@ -143,6 +143,59 @@ test('summarize computes CPL, jobs (Aspire # required) and ROI', () => {
   assert.strictEqual(p2.total.jobs, 1);
 });
 
+test('blank lead source falls back to original traffic source', () => {
+  const spendByMonth = { '2026-01': { basis: 'actual', byChannel: { google: 600 }, lines: [] } };
+  const deal = (o) => Object.assign({ created: '2026-01-10', won: false, aspire: '', amount: 0, source: '', traffic: '' }, o);
+  const deals = [
+    deal({ id: 'a', source: 'google_ads' }),
+    deal({ id: 'b', traffic: 'PAID_SEARCH', won: true, aspire: '1', amount: 1000 }),
+    deal({ id: 'c', traffic: 'OFFLINE', won: true, aspire: '2', amount: 5000 }),
+    deal({ id: 'd', source: 'organic', traffic: 'PAID_SEARCH' }),
+  ];
+  const s = M.summarize({ deals, spendByMonth }, { from: '2026-01', to: '2026-01', basis: 'cohort', includeUnknown: false });
+  const google = s.channels.find((c) => c.id === 'google');
+  assert.strictEqual(google.leads, 2);
+  assert.strictEqual(google.viaTraffic, 1);
+  assert.strictEqual(google.revenue, 1000);
+  assert.strictEqual(s.channels.find((c) => c.id === 'seo').leads, 1, 'a known lead source always wins');
+  assert.strictEqual(s.total.leads, 3, 'no-source deal excluded');
+  assert.strictEqual(s.total.revenue, 1000);
+  assert.deepStrictEqual([s.unattributed.leads, s.unattributed.jobs, s.unattributed.revenue], [1, 1, 5000]);
+  assert.strictEqual(s.unattributed.share, 5000 / 6000);
+});
+
+test('service line filter splits spend by each channel\'s lead share', () => {
+  const spendByMonth = { '2026-01': { basis: 'actual', byChannel: { google: 1000, tools: 400 }, lines: [] } };
+  const deal = (o) => Object.assign({ created: '2026-01-10', won: false, aspire: '', amount: 0, source: 'google_ads' }, o);
+  const deals = [
+    deal({ id: 'a', jobType: 'Lawn Care', won: true, aspire: '1', amount: 300 }),
+    deal({ id: 'b', jobType: 'Plant Health Care' }),
+    deal({ id: 'c', jobType: 'Landscape Design & Install', won: true, aspire: '2', amount: 20000 }),
+    deal({ id: 'd', jobType: 'Lawn Care;Enhancement' }),
+    deal({ id: 'e', jobType: '', source: '' }),
+  ];
+  const opts = { from: '2026-01', to: '2026-01', basis: 'cohort', includeUnknown: true };
+  const all = M.summarize({ deals, spendByMonth }, opts);
+  assert.strictEqual(all.allocated, false);
+  assert.strictEqual(all.total.spend, 1400);
+
+  const lpc = M.summarize({ deals, spendByMonth }, Object.assign({}, opts, { serviceLine: 'lpc' }));
+  assert.strictEqual(lpc.allocated, true);
+  assert.strictEqual(lpc.total.leads, 2);
+  // Google: 2 of its 4 leads are LPC → 500. Tools (no leads): 2 of all 5 leads → 160.
+  assert.strictEqual(lpc.total.spend, 660);
+  assert.strictEqual(lpc.total.revenue, 300);
+
+  const lines = M.summarizeServiceLines({ deals, spendByMonth }, opts);
+  const by = Object.fromEntries(lines.map((l) => [l.id, l]));
+  assert.strictEqual(by.enhance.leads, 1, 'multi-select counts once, under the earliest service line');
+  assert.strictEqual(by.none.leads, 1);
+  assert.strictEqual(by.none.marketingShare, 0);
+  assert.strictEqual(by.design.avgJob, 20000);
+  const spendSum = lines.reduce((a, l) => a + l.spend, 0);
+  assert.ok(Math.abs(spendSum - 1400) < 1e-9, 'allocated spend adds back up to the total');
+});
+
 test('periods and presets', () => {
   assert.deepStrictEqual(M.previousPeriod('2026-01', '2026-03'), { from: '2025-10', to: '2025-12' });
   const ytd = M.presets('2026-10').find((p) => p.id === 'ytd_complete');
@@ -198,7 +251,7 @@ test('Code.gs pulls deals, labels, pipelines, web analytics and the spend sheet'
     if (url.endsWith('/crm/v3/objects/deals/search')) {
       const body = JSON.parse(opts.payload);
       assert.strictEqual(body.filterGroups.length, 2, 'created OR closed since start');
-      const props = { dealname: 'Smith patio', createdate: '2026-03-04T12:00:00Z', closedate: '2026-04-01T00:00:00Z', hs_is_closed_won: 'true', aspire_opportunity: '4521', amount_in_home_currency: '12000', known_lead_source: 'google_ads', pipeline: '840356670' };
+      const props = { dealname: 'Smith patio', createdate: '2026-03-04T12:00:00Z', closedate: '2026-04-01T00:00:00Z', hs_is_closed_won: 'true', aspire_opportunity: '4521', amount_in_home_currency: '12000', known_lead_source: 'google_ads', pipeline: '840356670', hs_analytics_source: 'PAID_SEARCH', type_of_job: 'Enhancement' };
       if (!body.after) return resp(200, { results: [{ id: '1', properties: props }], paging: { next: { after: '1' } } });
       return resp(200, { results: [{ id: '2', properties: Object.assign({}, props, { hs_is_closed_won: 'false', aspire_opportunity: null }) }] });
     }
@@ -210,6 +263,7 @@ test('Code.gs pulls deals, labels, pipelines, web analytics and the spend sheet'
   assert.deepStrictEqual(data.deals[0], {
     id: '1', name: 'Smith patio', created: '2026-03-04', closed: '2026-04-01', won: true, aspire: '4521',
     amount: 12000, source: 'google_ads', sourceLabel: 'Google Ads', pipeline: 'Official Sales Pipeline',
+    traffic: 'PAID_SEARCH', jobType: 'Enhancement',
   });
   assert.strictEqual(data.deals[1].aspire, '');
   assert.deepStrictEqual(data.web, [{ month: '2026-03', source: 'Paid search', visits: 120, contacts: 9 }], 'offline sources dropped');

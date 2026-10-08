@@ -170,7 +170,7 @@ main > *, .grid-2 > *, .grid-3 > *, .stack > * { min-width: 0; }
 
 /* ---- KPI tiles ---- */
 .kpis-hero { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
-.kpis-small { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.kpis-small { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
 @media (max-width: 1000px) { .kpis-hero { grid-template-columns: repeat(2, 1fr); } .kpis-small { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 560px) { .kpis-hero, .kpis-small { grid-template-columns: 1fr 1fr; } }
 .kpi { position: relative; overflow: hidden; }
@@ -253,6 +253,14 @@ table.channels thead th[aria-sort="ascending"]::after { content: " ↑"; }
 table.channels tbody td { font-variant-numeric: tabular-nums; }
 table.channels tbody tr:hover { background: var(--surface-2); }
 table.channels tfoot td { font-weight: 700; border-bottom: 0; }
+table.lines thead th { cursor: default; }
+table.lines tr.clickable { cursor: pointer; }
+table.lines tr.clickable:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+table.lines tr.selected { background: var(--green-soft); }
+table.lines tr.selected .ch-name::after { content: " ✓"; color: var(--good); }
+.kpi.gap { background: var(--warn-bg); border-color: var(--warn-border); }
+.kpi.gap .label, .kpi.gap .delta.flat { color: var(--warn-text); }
+.kpi.gap .delta { white-space: normal; }
 .ch-name { font-weight: 600; }
 .ch-note { display: block; font-size: .76rem; color: var(--muted); font-weight: 400; }
 .rev-cell { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }

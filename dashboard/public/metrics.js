@@ -10,6 +10,7 @@
   //  - budgetItems: row names on the spend sheet's budget tab
   //  - vendors:     regexes matched against QuickBooks transaction Name/Num/Description
   //  - windsor:     Windsor.ai data source ids (optional)
+  //  - traffic:     HubSpot "Original Traffic Source" values used when Known lead source is blank
   // Spend that matches nothing lands in the channel marked defaultSpend; leads whose source
   // matches nothing land in the channel marked defaultLeads.
   const DEFAULT_CHANNELS = [
@@ -19,12 +20,14 @@
       budgetItems: ['Google PPC Ads', 'Google Local Service Ads'],
       vendors: ['google\\s*\\*?\\s*ads'],
       windsor: ['google_ads'],
+      traffic: ['PAID_SEARCH'],
     },
     {
       id: 'seo', name: 'SEO & website',
       leadSources: ['organic', 'Organic', 'WordPress Site'],
       budgetItems: ['Landscape Leadership'],
       vendors: ['landscape leadership', 'godaddy'],
+      traffic: ['ORGANIC_SEARCH'],
     },
     {
       id: 'shows', name: 'Home & Garden Show',
@@ -38,6 +41,7 @@
       budgetItems: ['Social Media Boosts'],
       vendors: ['\\bmeta\\b', 'facebook', 'facebk', 'instagram'],
       windsor: ['facebook'],
+      traffic: ['PAID_SOCIAL', 'SOCIAL_MEDIA'],
     },
     {
       id: 'print', name: 'Direct mail & print',
@@ -56,6 +60,17 @@
       leadSources: [''],
       defaultLeads: true,
     },
+  ];
+
+  // Service lines group HubSpot "Type of Job" values. Deals with no Type of Job land in the
+  // line marked defaultLine.
+  const DEFAULT_SERVICE_LINES = [
+    { id: 'design', name: 'Design & build', jobTypes: ['Landscape Design & Install'] },
+    { id: 'enhance', name: 'Enhancements', jobTypes: ['Enhancement'] },
+    { id: 'maint', name: 'Maintenance & gardening', jobTypes: ['Maintenance & Gardening'] },
+    { id: 'lpc', name: 'Lawn & plant care (LPC)', jobTypes: ['Lawn Care', 'Plant Health Care', 'Exterior Pest Control'] },
+    { id: 'irrigation', name: 'Irrigation', jobTypes: ['Irrigation Services'] },
+    { id: 'none', name: 'Type of job not set', jobTypes: [''], defaultLine: true },
   ];
 
   const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -126,6 +141,7 @@
     const bySource = {};
     const byItem = {};
     const byWindsor = {};
+    const byTraffic = {};
     const vendorRules = [];
     let defaultSpend = null;
     let defaultLeads = null;
@@ -133,6 +149,7 @@
       (c.leadSources || []).forEach((s) => { bySource[norm(s)] = c.id; });
       (c.budgetItems || []).forEach((s) => { byItem[norm(s)] = c.id; });
       (c.windsor || []).forEach((s) => { byWindsor[norm(s)] = c.id; });
+      (c.traffic || []).forEach((s) => { byTraffic[norm(s)] = c.id; });
       (c.vendors || []).forEach((re) => vendorRules.push({ re: new RegExp(re, 'i'), id: c.id }));
       if (c.defaultSpend) defaultSpend = c.id;
       if (c.defaultLeads) defaultLeads = c.id;
@@ -142,12 +159,41 @@
     return {
       channels,
       byId: Object.fromEntries(channels.map((c) => [c.id, c])),
+      defaultLeads,
       forSource: (value, label) => bySource[norm(value)] || bySource[norm(label)] || defaultLeads,
+      // Known lead source first; when it's blank, fall back to the original traffic source.
+      attribute(deal) {
+        const known = bySource[norm(deal.source)] || bySource[norm(deal.sourceLabel)];
+        if (known && known !== defaultLeads) return { id: known, viaTraffic: false };
+        if (!norm(deal.source)) {
+          const t = byTraffic[norm(deal.traffic)];
+          if (t) return { id: t, viaTraffic: true };
+        }
+        return { id: known || defaultLeads, viaTraffic: false };
+      },
       forItem: (item) => byItem[norm(item)] || defaultSpend,
       forWindsor: (src) => byWindsor[norm(src)] || null,
       forVendor(text) {
         const hit = vendorRules.find((r) => r.re.test(text));
         return hit ? hit.id : defaultSpend;
+      },
+    };
+  }
+
+  function makeLineIndex(lines) {
+    lines = lines || DEFAULT_SERVICE_LINES;
+    const byType = {};
+    lines.forEach((l) => (l.jobTypes || []).forEach((t) => { byType[norm(t)] = l.id; }));
+    const fallback = (lines.find((l) => l.defaultLine) || lines[lines.length - 1]).id;
+    const order = lines.map((l) => l.id);
+    return {
+      lines,
+      // "Type of Job" is multi-select ("A;B"). A deal counts once, under whichever of its types
+      // comes first in the service line list, so revenue is never double-counted.
+      forType(jobType) {
+        const ids = String(jobType || '').split(';').map((t) => byType[norm(t)]).filter(Boolean);
+        if (!ids.length) return fallback;
+        return ids.sort((x, y) => order.indexOf(x) - order.indexOf(y))[0];
       },
     };
   }
@@ -318,47 +364,89 @@
 
   const safeDiv = (a, b) => (b ? a / b : null);
 
-  // opts: { from, to, pipeline ('all' or name), basis ('cohort' | 'closed'),
-  //         includeUnknown (count leads with no source), channels }
+  // opts: { from, to, pipeline ('all' or name), serviceLine ('all' or id), basis ('cohort' | 'closed'),
+  //         includeUnknown (count deals with no lead source), channels, serviceLines }
+  //
+  // Spend isn't tagged by pipeline or service line, so when either filter is set each channel's
+  // spend for a month is split by that channel's share of the month's leads (overhead and
+  // lead-less channels by the month's overall share). Those figures come back with allocated: true.
   function summarize(data, opts) {
     const idx = makeChannelIndex(opts.channels || (data.config && data.config.channels));
+    const lineIdx = makeLineIndex(opts.serviceLines || (data.config && data.config.serviceLines));
     const months = monthRange(opts.from, opts.to);
     const inRange = (m) => m && m >= opts.from && m <= opts.to;
     const spendByMonth = data.spendByMonth || buildSpend(data.workbook, { index: idx, windsor: data.windsor });
-    const deals = (data.deals || []).filter((d) => !opts.pipeline || opts.pipeline === 'all' || d.pipeline === opts.pipeline);
-    const unknownId = idx.channels.find((c) => c.defaultLeads).id;
+    const unknownId = idx.defaultLeads;
+    const byPipeline = !opts.pipeline || opts.pipeline === 'all';
+    const byLine = !opts.serviceLine || opts.serviceLine === 'all';
+    const matches = (d) => (byPipeline || d.pipeline === opts.pipeline) && (byLine || lineIdx.forType(d.jobType) === opts.serviceLine);
+    const allocated = !byPipeline || !byLine;
 
-    const blank = () => ({ spend: 0, leads: 0, jobs: 0, revenue: 0, wonNoAspire: 0 });
+    const all = (data.deals || []).map((d) => {
+      const a = idx.attribute(d);
+      return { d, ch: a.id, viaTraffic: a.viaTraffic, created: monthOf(d.created), closed: monthOf(d.closed), keep: matches(d) };
+    });
+
+    const blank = () => ({ spend: 0, leads: 0, jobs: 0, revenue: 0, wonNoAspire: 0, viaTraffic: 0 });
     const byChannel = Object.fromEntries(idx.channels.map((c) => [c.id, blank()]));
     const byMonth = Object.fromEntries(months.map((m) => [m, blank()]));
     const total = blank();
+    const unattributed = { leads: 0, jobs: 0, revenue: 0 };
+    let allRevenue = 0;
     const missingAspire = [];
+
+    // Lead counts per month × channel, all deals vs. the filtered slice, for spend allocation.
+    const share = {};
+    if (allocated) {
+      all.forEach((x) => {
+        if (!inRange(x.created)) return;
+        const k = x.created;
+        const r = share[k] || (share[k] = { all: 0, mine: 0, ch: {} });
+        const c = r.ch[x.ch] || (r.ch[x.ch] = { all: 0, mine: 0 });
+        r.all++; c.all++;
+        if (x.keep) { r.mine++; c.mine++; }
+      });
+    }
+    const spendShare = (m, id) => {
+      if (!allocated) return 1;
+      const r = share[m];
+      if (!r || !r.all) return 0;
+      const c = r.ch[id];
+      return c && c.all ? c.mine / c.all : r.mine / r.all;
+    };
 
     months.forEach((m) => {
       const rec = spendByMonth[m];
       if (!rec) return;
       Object.entries(rec.byChannel).forEach(([id, amt]) => {
+        const v = amt * spendShare(m, id);
         if (!byChannel[id]) byChannel[id] = blank();
-        byChannel[id].spend += amt;
-        byMonth[m].spend += amt;
-        total.spend += amt;
+        byChannel[id].spend += v;
+        byMonth[m].spend += v;
+        total.spend += v;
       });
     });
 
-    deals.forEach((d) => {
-      const ch = idx.forSource(d.source, d.sourceLabel);
+    all.forEach(({ d, ch, viaTraffic, created, closed, keep }) => {
+      if (!keep) return;
       const counted = opts.includeUnknown !== false || ch !== unknownId;
-      const created = monthOf(d.created);
-      const closed = monthOf(d.closed);
-      if (inRange(created) && counted) {
+      const revMonth = opts.basis === 'closed' ? closed : created;
+      const job = d.won && isJob(d) && inRange(revMonth);
+      const amt = Number(d.amount) || 0;
+      if (ch === unknownId) {
+        if (inRange(created)) unattributed.leads++;
+        if (job) { unattributed.jobs++; unattributed.revenue += amt; }
+      }
+      if (job) allRevenue += amt;
+      if (!counted) return;
+      if (inRange(created)) {
         byChannel[ch].leads++;
         byMonth[created].leads++;
         total.leads++;
+        if (viaTraffic) { byChannel[ch].viaTraffic++; total.viaTraffic++; }
       }
-      const revMonth = opts.basis === 'closed' ? closed : created;
-      if (d.won && inRange(revMonth) && counted) {
-        if (isJob(d)) {
-          const amt = Number(d.amount) || 0;
+      if (d.won && inRange(revMonth)) {
+        if (job) {
           byChannel[ch].jobs++; byChannel[ch].revenue += amt;
           byMonth[revMonth].jobs++; byMonth[revMonth].revenue += amt;
           total.jobs++; total.revenue += amt;
@@ -374,26 +462,23 @@
       cpl: r.spend ? safeDiv(r.spend, r.leads) : null,
       costPerJob: r.spend ? safeDiv(r.spend, r.jobs) : null,
       closeRate: safeDiv(r.jobs, r.leads),
+      avgJob: safeDiv(r.revenue, r.jobs),
       roi: r.spend ? (r.revenue - r.spend) / r.spend : null,
-      roas: safeDiv(r.revenue, r.spend),
+      roas: r.spend ? safeDiv(r.revenue, r.spend) : null,
     });
     derive(total);
     Object.values(byChannel).forEach(derive);
     Object.values(byMonth).forEach(derive);
+    unattributed.share = safeDiv(unattributed.revenue, allRevenue);
 
-    const basisCounts = { actual: 0, partial: 0, budget: 0, none: 0 };
-    const estimatedMonths = [];
-    months.forEach((m) => {
-      const rec = spendByMonth[m];
-      const b = rec ? rec.basis : 'none';
-      basisCounts[b]++;
-      if (b !== 'actual') estimatedMonths.push(m);
-    });
+    const estimatedMonths = months.filter((m) => !spendByMonth[m] || spendByMonth[m].basis !== 'actual');
 
     return {
       months,
       total,
       byMonth,
+      allocated,
+      unattributed,
       channels: idx.channels
         .filter((c) => opts.includeUnknown !== false || c.id !== unknownId)
         .map((c) => Object.assign({ id: c.id, name: c.name, overhead: !c.leadSources }, byChannel[c.id])),
@@ -401,6 +486,18 @@
       estimatedMonths,
       missingAspire: missingAspire.sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)),
     };
+  }
+
+  // One summary per service line (same period and filters), for the service line table.
+  function summarizeServiceLines(data, opts) {
+    const lineIdx = makeLineIndex(opts.serviceLines || (data.config && data.config.serviceLines));
+    return lineIdx.lines.map((l) => {
+      const s = summarize(data, Object.assign({}, opts, { serviceLine: l.id }));
+      const inc = opts.includeUnknown !== false;
+      const allLeads = inc ? s.total.leads : s.total.leads + s.unattributed.leads;
+      const marketingShare = safeDiv(allLeads - s.unattributed.leads, allLeads);
+      return Object.assign({ id: l.id, name: l.name, marketingShare, unattributed: s.unattributed }, s.total);
+    });
   }
 
   // Previous period of the same length, for the deltas on the KPI tiles.
@@ -446,6 +543,9 @@
 
   return {
     DEFAULT_CHANNELS,
+    DEFAULT_SERVICE_LINES,
+    makeLineIndex,
+    summarizeServiceLines,
     parseMoney,
     monthOf,
     addMonths,

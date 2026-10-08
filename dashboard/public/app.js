@@ -14,8 +14,10 @@
     from: null,
     to: null,
     pipeline: 'all',
+    serviceLine: 'all',
+    serviceLines: null,
     basis: 'cohort',
-    includeUnknown: true,
+    includeUnknown: false,
     sort: { key: 'revenue', dir: -1 },
   };
 
@@ -67,6 +69,7 @@
   function prepare(data) {
     state.data = data;
     state.channels = (data.config && data.config.channels) || M.DEFAULT_CHANNELS;
+    state.serviceLines = (data.config && data.config.serviceLines) || M.DEFAULT_SERVICE_LINES;
     const workbook = data.workbook || M.parseSpendWorkbook(data.spendTabs || [], { year: data.year, budgetTab: data.budgetTab });
     state.spendByMonth = data.spendByMonth || M.buildSpend(workbook, { channels: state.channels, windsor: data.windsor });
     if (!workbook.budget.length && !Object.keys(workbook.transactions).length && !data.spendByMonth) {
@@ -96,6 +99,7 @@
     const pipes = [...new Set((d.pipelines && d.pipelines.length ? d.pipelines : d.deals.map((x) => x.pipeline)).filter(Boolean))];
     $('#pipeline').innerHTML = '<option value="all">All pipelines</option>' + pipes.map((p) => `<option>${esc(p)}</option>`).join('');
     $('#pipeline').closest('.field').hidden = pipes.length < 2;
+    $('#serviceLine').innerHTML = '<option value="all">All service lines</option>' + state.serviceLines.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
     applyPeriod(state.period);
     syncControls();
     if (filtersReady) return;
@@ -105,6 +109,7 @@
     $('#fromMonth').addEventListener('change', (e) => { state.from = e.target.value; if (state.to < state.from) state.to = state.from; syncControls(); render(); });
     $('#toMonth').addEventListener('change', (e) => { state.to = e.target.value; if (state.from > state.to) state.from = state.to; syncControls(); render(); });
     $('#pipeline').addEventListener('change', (e) => { state.pipeline = e.target.value; render(); });
+    $('#serviceLine').addEventListener('change', (e) => { state.serviceLine = e.target.value; render(); });
     $('#includeUnknown').addEventListener('change', (e) => { state.includeUnknown = e.target.checked; render(); });
     document.querySelectorAll('.segmented button').forEach((b) => b.addEventListener('click', () => {
       state.basis = b.dataset.basis; syncControls(); render();
@@ -128,6 +133,7 @@
     $('#fromMonth').value = state.from;
     $('#toMonth').value = state.to;
     $('#pipeline').value = state.pipeline;
+    $('#serviceLine').value = state.serviceLine;
     $('#includeUnknown').checked = state.includeUnknown;
     document.querySelectorAll('.segmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.basis === state.basis)));
   }
@@ -135,11 +141,14 @@
   // ---- render ----
   let lastSummary = null;
 
+  const summaryData = () => ({ deals: state.data.deals, spendByMonth: state.spendByMonth, config: { channels: state.channels, serviceLines: state.serviceLines } });
+  const summaryOpts = (from, to) => ({
+    from, to, pipeline: state.pipeline, serviceLine: state.serviceLine, basis: state.basis,
+    includeUnknown: state.includeUnknown, channels: state.channels, serviceLines: state.serviceLines,
+  });
+
   function summarize(from, to) {
-    return M.summarize(
-      { deals: state.data.deals, spendByMonth: state.spendByMonth, config: { channels: state.channels } },
-      { from, to, pipeline: state.pipeline, basis: state.basis, includeUnknown: state.includeUnknown, channels: state.channels },
-    );
+    return M.summarize(summaryData(), summaryOpts(from, to));
   }
 
   function periodName(from, to) {
@@ -184,6 +193,12 @@
         </div>
         <div class="table-wrap">${channelTable(s)}</div>
       </section>
+      <section class="card">
+        <div class="card-head">
+          <div><h2>Service lines</h2><div class="sub">From HubSpot “Type of Job”. Spend isn't tagged by service line, so it's split by each channel's share of leads (estimate). Click a row to filter the dashboard.</div></div>
+        </div>
+        <div class="table-wrap">${serviceLineTable()}</div>
+      </section>
       <section class="grid-3">
         <div class="card">
           <div class="card-head"><div><h2>Website traffic</h2><div class="sub">HubSpot tracking, by traffic source</div></div></div>
@@ -201,7 +216,12 @@
       <section class="card">${spendDetailHtml(s)}</section>
     `;
 
-    app.querySelectorAll('table.channels thead th[data-key]').forEach((th) => th.addEventListener('click', () => {
+    app.querySelectorAll('tr[data-line]').forEach((tr) => {
+      const pick = () => { state.serviceLine = state.serviceLine === tr.dataset.line ? 'all' : tr.dataset.line; syncControls(); render(); };
+      tr.addEventListener('click', pick);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
+    app.querySelectorAll('table.channels:not(.lines) thead th[data-key]').forEach((th) => th.addEventListener('click', () => {
       const k = th.dataset.key;
       state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : (k === 'name' || k === 'cpl' || k === 'costPerJob' ? 1 : -1) };
       render();
@@ -215,6 +235,10 @@
     if (s.estimatedMonths.length) {
       const names = s.estimatedMonths.map((m) => M.monthLabel(m)).join(', ');
       items.push(`No actual spend recorded yet for ${names}: those months use the budget column, so CPL and ROI there are estimates.`);
+    }
+    if (s.allocated) {
+      const what = [state.serviceLine !== 'all' && (state.serviceLines.find((l) => l.id === state.serviceLine) || {}).name, state.pipeline !== 'all' && state.pipeline].filter(Boolean).join(' · ');
+      items.push(`Filtered to ${what}. Spend isn't tagged by service line or pipeline, so it's estimated by splitting each channel's spend by its share of leads.`);
     }
     if (!items.length) return '';
     return `<div class="notice-list">${items.map((t) => `<div class="notice"><span class="icon">!</span><div>${esc(t)}</div></div>`).join('')}</div>`;
@@ -233,11 +257,11 @@
 
   function heroKpis(s, p) {
     const t = s.total;
-    const est = s.estimatedMonths.length ? '<span class="est">est.</span>' : '';
+    const est = s.estimatedMonths.length || s.allocated ? '<span class="est">est.</span>' : '';
     return [
       { label: 'Cost per lead', value: money(t.cpl), est, d: delta(t.cpl, p && p.total.cpl, true), note: `${int(t.leads)} leads` },
       { label: 'Marketing ROI', value: roiText(t.roi), est, d: delta(t.roi, p && p.total.roi, false, 'pts'), note: `${roas(t.roas)} return on ad spend` },
-      { label: 'Job revenue', value: moneyShort(t.revenue), d: delta(t.revenue, p && p.total.revenue), note: `${int(t.jobs)} jobs with an Aspire #` },
+      { label: state.includeUnknown ? 'Job revenue' : 'Marketing job revenue', value: moneyShort(t.revenue), d: delta(t.revenue, p && p.total.revenue), note: `${int(t.jobs)} jobs with an Aspire #` },
       { label: 'Marketing spend', value: moneyShort(t.spend), est, d: delta(t.spend, p && p.total.spend, true), note: money(t.spend) },
     ].map((k) => `
       <div class="card kpi accent">
@@ -255,9 +279,13 @@
       { label: 'Jobs closed', value: int(t.jobs), d: delta(t.jobs, p && p.total.jobs) },
       { label: 'Lead → job rate', value: pct(t.closeRate, 1), d: delta(t.closeRate, p && p.total.closeRate, false, 'pts') },
       { label: 'Cost per job', value: money(t.costPerJob), d: delta(t.costPerJob, p && p.total.costPerJob, true) },
-      { label: 'Avg job value', value: money(t.jobs ? t.revenue / t.jobs : null), d: delta(t.jobs ? t.revenue / t.jobs : null, p && p.total.jobs ? p.total.revenue / p.total.jobs : null) },
+      { label: 'Avg job value', value: money(t.avgJob), d: delta(t.avgJob, p && p.total.avgJob) },
+      {
+        label: 'Revenue with no lead source', cls: 'gap', value: moneyShort(s.unattributed.revenue),
+        d: `<span class="delta flat">${pct(s.unattributed.share)} of all job revenue · ${int(s.unattributed.jobs)} jobs</span>`,
+      },
     ].map((k) => `
-      <div class="card kpi">
+      <div class="card kpi ${k.cls || ''}">
         <div class="label">${k.label}</div>
         <div class="value num">${k.value}</div>
         <div>${k.d}</div>
@@ -328,7 +356,7 @@
     const th = cols.map(([key, label]) => `<th data-key="${key}" ${key === k ? `aria-sort="${state.sort.dir < 0 ? 'descending' : 'ascending'}"` : ''}>${label}</th>`).join('');
     const body = rows.map((c) => `
       <tr>
-        <td><span class="ch-name">${esc(c.name)}</span>${notes[c.id] ? `<span class="ch-note">${notes[c.id]}</span>` : ''}${c.wonNoAspire ? `<span class="ch-note">+${c.wonNoAspire} won without Aspire #</span>` : ''}</td>
+        <td><span class="ch-name">${esc(c.name)}</span>${notes[c.id] ? `<span class="ch-note">${notes[c.id]}</span>` : ''}${c.viaTraffic ? `<span class="ch-note">incl. ${c.viaTraffic} credited by website traffic source</span>` : ''}${c.wonNoAspire ? `<span class="ch-note">+${c.wonNoAspire} won without Aspire #</span>` : ''}</td>
         <td>${c.spend ? money(c.spend) : '—'}</td>
         <td>${c.overhead ? '—' : int(c.leads)}</td>
         <td>${c.cpl == null ? '—' : money(c.cpl)}</td>
@@ -346,6 +374,28 @@
         <td>Total</td><td>${money(t.spend)}</td><td>${int(t.leads)}</td><td>${money(t.cpl)}</td><td>${int(t.jobs)}</td>
         <td>${pct(t.closeRate, 1)}</td><td>${money(t.costPerJob)}</td><td>${money(t.revenue)}</td><td>${roiPill(t.roi)}</td>
       </tr></tfoot>
+    </table>`;
+  }
+
+  function serviceLineTable() {
+    const lines = M.summarizeServiceLines(summaryData(), Object.assign(summaryOpts(state.from, state.to), { serviceLine: 'all' }));
+    const maxRev = Math.max(1, ...lines.map((l) => l.revenue));
+    const body = lines.map((l) => `
+      <tr data-line="${esc(l.id)}" tabindex="0" class="clickable${state.serviceLine === l.id ? ' selected' : ''}" aria-pressed="${state.serviceLine === l.id}">
+        <td><span class="ch-name">${esc(l.name)}</span>${l.id === 'none' ? '<span class="ch-note">Deals with no “Type of Job”</span>' : ''}</td>
+        <td>${int(l.leads)}</td>
+        <td>${pct(l.marketingShare)}</td>
+        <td>${int(l.jobs)}</td>
+        <td>${pct(l.closeRate, 1)}</td>
+        <td>${money(l.avgJob)}</td>
+        <td><div class="rev-cell">${money(l.revenue)}<span class="rev-bar" aria-hidden="true"><span style="width:${(l.revenue / maxRev * 100).toFixed(1)}%"></span></span></div></td>
+        <td>${l.spend ? money(l.spend) : '—'}</td>
+        <td>${l.cpl == null ? '—' : money(l.cpl)}</td>
+        <td>${l.spend ? roiPill(l.roi) : '<span class="pill flat">—</span>'}</td>
+      </tr>`).join('');
+    return `<table class="channels lines">
+      <thead><tr><th>Service line</th><th>Leads</th><th title="Share of all deals in this line that have a lead source (or a paid/organic traffic source)">Has lead source</th><th>Jobs</th><th>Lead → job</th><th>Avg job</th><th>Job revenue</th><th>Est. spend</th><th>Est. cost / lead</th><th>Est. ROI</th></tr></thead>
+      <tbody>${body}</tbody>
     </table>`;
   }
 
