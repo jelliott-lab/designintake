@@ -1,5 +1,7 @@
 # Turf Care Call Guide
 
+> This repo also contains the **[Marketing Dashboard](dashboard/README.md)**: CPL and ROI from HubSpot, Aspire #s and the advertising spend sheet.
+
 A web app that walks a phone rep through the Precision Turf Care sales call, captures everything
 the customer says, and produces a formatted summary to enter into Aspire **after** the call.
 

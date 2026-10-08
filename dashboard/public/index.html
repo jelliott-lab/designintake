@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marketing Dashboard · Precision</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232f7d32'/><path d='M8 24c2-6 4-10 8-14M16 24c0-5 1-9 4-13M24 24c-1-4-1-8 0-11' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M8 24c2-6 4-10 8-14M16 24c0-5 1-9 4-13M24 24c-1-4-1-8 0-11" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>
+        </span>
+        <div>
+          <div class="brand-eyebrow">Precision Landscape Management</div>
+          <h1>Marketing performance</h1>
+        </div>
+      </div>
+      <div class="hero-meta">
+        <span id="updated" class="updated"></span>
+        <button id="refreshBtn" class="btn ghost" type="button">Refresh data</button>
+      </div>
+    </div>
+
+    <form class="filters" id="filters" onsubmit="return false">
+      <label class="field">
+        <span>Period</span>
+        <select id="period"></select>
+      </label>
+      <label class="field custom-range" hidden>
+        <span>From</span>
+        <select id="fromMonth"></select>
+      </label>
+      <label class="field custom-range" hidden>
+        <span>To</span>
+        <select id="toMonth"></select>
+      </label>
+      <label class="field">
+        <span>Pipeline</span>
+        <select id="pipeline"><option value="all">All pipelines</option></select>
+      </label>
+      <div class="field">
+        <span id="basisLabel">Count jobs by</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="basisLabel">
+          <button type="button" role="radio" data-basis="cohort" title="Jobs from leads that came in during the period">Lead month</button>
+          <button type="button" role="radio" data-basis="closed" title="Jobs that closed during the period, whenever the lead came in">Close month</button>
+        </div>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="includeUnknown" checked>
+        <span>Include referral / no-source leads</span>
+      </label>
+    </form>
+  </header>
+
+  <main id="app" aria-live="polite">
+    <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading HubSpot, spend and web data…</div>
+  </main>
+
+  <footer class="foot">
+    Leads = HubSpot deals created. Jobs = Closed Won deals with an Aspire Opportunity #. Revenue = HubSpot deal amount on those jobs.
+    Spend = QuickBooks transactions on the advertising sheet (budget where no actuals yet).
+  </footer>
+
+  <script src="sample-data.js"></script>
+  <script src="metrics.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
