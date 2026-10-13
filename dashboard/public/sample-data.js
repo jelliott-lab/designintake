@@ -31,12 +31,19 @@
         const closedStr = `${cm.getFullYear()}-${pad(cm.getMonth() + 1)}-${pad(cm.getDate())}`;
         const jobType = pick([['Landscape Design & Install', 32], ['Maintenance & Gardening', 17], ['Enhancement', 16], ['Lawn Care', 14], ['Plant Health Care', 2], ['Irrigation Services', 5], ['Exterior Pest Control', 2], ['', 12]]);
         const big = jobType === 'Landscape Design & Install' && rand() < 0.4;
+        const isWon = won && closedStr <= `${currentMonth}-28`;
+        const ageDays = (now - new Date(created)) / 864e5;
+        const open = !isWon && ageDays < 75 && rand() < 0.35;
+        const lost = !isWon && !open;
+        const killed = lost && rand() < (source === 'google_ads' ? 0.62 : source === 'Home & Garden Show' ? 0.15 : 0.4);
+        const stage = open ? pick([['New Lead', 6], ['Appointment Scheduled', 30], ['Design Phase', 10], ['Estimating', 20], ['Contract Sent', 25], ['Revisions', 4]]) : isWon ? 'Closed Won' : 'Closed Lost';
+        const stageDays = open ? (stage === 'New Lead' ? rand() * 0.6 : Math.min(ageDays, rand() * 30)) : null;
         deals.push({
           id: `sample-${id++}`,
           name: `Sample project ${id}`,
           created,
           closed: won && closedStr <= `${currentMonth}-28` ? closedStr : null,
-          won: won && closedStr <= `${currentMonth}-28`,
+          won: isWon,
           aspire: rand() < 0.88 ? String(20000 + id) : '',
           amount: Math.round(big ? 40000 + rand() * 120000 : 2500 + rand() * 18000),
           source,
@@ -44,6 +51,18 @@
           pipeline: jobType === 'Lawn Care' && rand() < 0.5 ? 'Lawn Care Pipeline' : 'Official Sales Pipeline',
           traffic: source ? '' : pick([['OFFLINE', 75], ['DIRECT_TRAFFIC', 10], ['', 10], ['PAID_SEARCH', 3], ['ORGANIC_SEARCH', 2]]),
           jobType,
+          stage,
+          open,
+          lost,
+          killed,
+          lostReason: !lost ? '' : killed ? pick([['Unqualified with Approval', 55], ['Out of Service Area', 15], ['Spam', 8], ['Unable to Contact', 22]]) : pick([['Price', 35], ['Went with Competitor', 20], ['Unable to Contact', 15], ['Changed Mind', 15], ['Bad Timing', 15]]),
+          designPath: isWon ? jobType === 'Landscape Design & Install' : false,
+          firstTouchMs: source ? (source === 'google_ads' ? 0.5 + rand() * 3 : 2 + rand() * 30) * 36e5 : 5 * 6e4,
+          stageEntered: open ? new Date(now - stageDays * 864e5).toISOString() : null,
+          stageDays,
+          daysToClose: isWon ? Math.round((new Date(closedStr) - new Date(created)) / 864e5) : null,
+          owner: pick([['Sample rep A', 1], ['Sample rep B', 1], ['Sample rep C', 1]]),
+          repCreated: !source,
         });
       }
     }
@@ -90,7 +109,7 @@
     currentMonth,
     year,
     budgetTab: `${year} Budget`,
-    config: { channels: null },
+    config: { channels: null, eventCosts: [{ channel: 'shows', name: `Home & Garden Show ${year}`, cost: 30000, year }] },
     portalId: null,
     deals,
     pipelines: ['Official Sales Pipeline', 'Lawn Care Pipeline'],

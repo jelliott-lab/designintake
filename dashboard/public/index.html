@@ -21,6 +21,7 @@
       </div>
       <div class="hero-meta">
         <span id="updated" class="updated"></span>
+        <a id="flagBadge" class="flag-badge" href="#flags" hidden></a>
         <button id="refreshBtn" class="btn ghost" type="button">Refresh data</button>
       </div>
     </div>
@@ -55,7 +56,7 @@
       </div>
       <label class="check">
         <input type="checkbox" id="includeUnknown">
-        <span>Include referral / no-source deals</span>
+        <span>Include self-sourced deals (no lead source)</span>
       </label>
     </form>
   </header>
@@ -65,13 +66,14 @@
   </main>
 
   <footer class="foot">
-    Leads = HubSpot deals created. Channel = “Known lead source”, or the original traffic source (paid search, organic search, social) when that's blank.
-    Jobs = Closed Won deals with an Aspire Opportunity #. Revenue = HubSpot deal amount on those jobs. Service line = “Type of Job”.
-    Spend = QuickBooks transactions on the advertising sheet (budget where no actuals yet).
+    Definitions follow the Marketing Standards &amp; Trigger System. Marketing lead = HubSpot deal with a lead source (“Known lead source”, else the original traffic source for paid search, organic search and social); rep-created deals with no source are self-sourced.
+    Spend = working media from the QuickBooks advertising ledger, excluding software and the HBA amortisation; event true costs are charged by leads. Cost per lead uses leads created that month; qualified CPL removes leads killed at phone.
+    Jobs = Closed Won deals with an Aspire Opportunity #; revenue = HubSpot deal amount. Return on spend = job revenue ÷ spend, credited to the lead month and judged only once the month is 90 days old. Service line = “Type of Job”.
   </footer>
 
   <script src="sample-data.js"></script>
   <script src="metrics.js"></script>
+  <script src="flags.js"></script>
   <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>

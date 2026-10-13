@@ -11,7 +11,7 @@ const inlineScript = (file) => `<script>\n${read(file).replace(/<\/script/gi, '<
 let html = read('index.html');
 html = html.replace('<link rel="stylesheet" href="styles.css">', () => `<style>\n${read('styles.css')}\n</style>`);
 html = html.replace(/\n\s*<script src="sample-data\.js"><\/script>/, '');
-for (const f of ['metrics.js', 'charts.js', 'app.js']) {
+for (const f of ['metrics.js', 'flags.js', 'charts.js', 'app.js']) {
   html = html.replace(`<script src="${f}"></script>`, () => inlineScript(f));
 }
 if (/(href|src)="[\w-]+\.(css|js)"/.test(html)) throw new Error('Failed to inline an asset');

@@ -77,7 +77,8 @@
     });
   }
 
-  // opts: { labels, series: [{ name, cls, values }], fmt, tip(i) → html, height, ariaLabel }
+  // opts: { labels, series: [{ name, cls, values }], fmt, tip(i) → html, height, ariaLabel,
+  //         barClass(i, series) → extra class for one bar (optional) }
   function columns(container, opts) {
     const H = opts.height || 260;
     const { svg, width } = frame(container, H);
@@ -103,7 +104,7 @@
         const x = cx(i) - groupW / 2 + si * (barW + gap);
         const h = y(0) - y(v || 0);
         const d = colPath(x, y(v || 0), barW, h);
-        if (d) el('path', { d }, g);
+        if (d) el('path', { d, class: opts.barClass ? opts.barClass(i, s) || null : null }, g);
       });
     });
     xLabels(svg, opts.labels, cx, H - 8, n > 14 ? 2 : 1);

@@ -1,5 +1,6 @@
 // Shared, DOM-free dashboard math: parses the spend sheet, maps spend and leads to channels,
-// and computes CPL / ROI for a period. Loaded in the browser as window.Metrics and in Node
+// and computes CPL / return for a period, following the definitions in the "Marketing
+// Standards & Trigger System" doc. Loaded in the browser as window.Metrics and in Node
 // tests via require(). Months are 'YYYY-MM' strings throughout.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -12,7 +13,8 @@
   //  - windsor:     Windsor.ai data source ids (optional)
   //  - traffic:     HubSpot "Original Traffic Source" values used when Known lead source is blank
   // Spend that matches nothing lands in the channel marked defaultSpend; leads whose source
-  // matches nothing land in the channel marked defaultLeads.
+  // matches nothing land in the channel marked defaultLeads. A channel marked excluded is not
+  // working media (standards: software and the HBA amortisation are left out of spend).
   const DEFAULT_CHANNELS = [
     {
       id: 'google', name: 'Google Ads',
@@ -32,8 +34,7 @@
     {
       id: 'shows', name: 'Home & Garden Show',
       leadSources: ['Home & Garden Show'],
-      budgetItems: ['HBA Invoice Payoff', 'SWAG for Events'],
-      vendors: ['\\bhba\\b'],
+      budgetItems: ['SWAG for Events'],
     },
     {
       id: 'social', name: 'Social media',
@@ -50,13 +51,18 @@
       vendors: ['vista\\s*print', '\\bmoo\\b', 'fedex', 'print\\s*fast', 'minuteman', 'postal service', '\\busps\\b', 'mailers?\\b'],
     },
     {
-      id: 'tools', name: 'Tools, events & other',
-      budgetItems: ['Hubspot', 'Call Rail', 'Misc', 'AI Ads?'],
-      vendors: ['hubspot', 'call\\s*rail', 'mailchimp', 'buzzsprout'],
+      id: 'excluded', name: 'Software & HBA amortisation',
+      budgetItems: ['Hubspot', 'Call Rail', 'HBA Invoice Payoff'],
+      vendors: ['hubspot', 'call\\s*rail', 'mailchimp', 'buzzsprout', 'g\\s*suite', 'google workspace', '\\bhba\\b'],
+      excluded: true,
+    },
+    {
+      id: 'other', name: 'Other media (untracked)',
+      budgetItems: ['Misc', 'AI Ads?'],
       defaultSpend: true,
     },
     {
-      id: 'unknown', name: 'Referral / no source',
+      id: 'unknown', name: 'Self-sourced (no lead source)',
       leadSources: [''],
       defaultLeads: true,
     },
@@ -177,6 +183,8 @@
         const hit = vendorRules.find((r) => r.re.test(text));
         return hit ? hit.id : defaultSpend;
       },
+      matchesVendor: (text) => vendorRules.some((r) => r.re.test(text)),
+      matchesItem: (item) => norm(item) in byItem,
     };
   }
 
@@ -323,7 +331,7 @@
         txn.lines.forEach((l) => {
           const id = idx.forVendor(l.text);
           add(rec, id, l.amount);
-          rec.lines.push({ label: l.text, channel: id, amount: l.amount });
+          rec.lines.push({ label: l.text, channel: id, amount: l.amount, matched: idx.matchesVendor(l.text) });
         });
       } else if (budgetRows.some((r) => r.actual != null && r.actual !== 0)) {
         rec.basis = 'actual';
@@ -331,7 +339,7 @@
         budgetRows.forEach((r) => {
           if (!r.actual) return;
           add(rec, idx.forItem(r.item), r.actual);
-          rec.lines.push({ label: r.item, channel: idx.forItem(r.item), amount: r.actual });
+          rec.lines.push({ label: r.item, channel: idx.forItem(r.item), amount: r.actual, matched: idx.matchesItem(r.item) });
         });
       } else {
         const w = windsor.filter((x) => x.month === month && idx.forWindsor(x.source));
@@ -354,11 +362,59 @@
     return out;
   }
 
+  // ---- true event cost (standards CS-5) ---------------------------------------
+
+  // An event's all-in cost often reaches the ledger amortised (the Home & Garden Show runs
+  // through the HBA package over 23 months). eventCosts: [{ channel, name, cost, year }].
+  // The channel's ledger spend for that year is replaced by the true cost, charged to the
+  // months the channel produced leads in proportion to those leads.
+  // Returns a new spendByMonth plus { events: [{ ...event, ledger, allocated }] }.
+  function applyEventCosts(spendByMonth, deals, eventCosts, channels) {
+    const out = JSON.parse(JSON.stringify(spendByMonth || {}));
+    const events = [];
+    if (!eventCosts || !eventCosts.length) return { spendByMonth: out, events };
+    const idx = makeChannelIndex(channels);
+    eventCosts.forEach((ev) => {
+      const year = String(ev.year);
+      const leads = {};
+      (deals || []).forEach((d) => {
+        const m = monthOf(d.created);
+        if (m && m.slice(0, 4) === year && idx.attribute(d).id === ev.channel) leads[m] = (leads[m] || 0) + 1;
+      });
+      let ledger = 0;
+      Object.values(out).forEach((rec) => {
+        if (rec.month.slice(0, 4) !== year || !rec.byChannel[ev.channel]) return;
+        ledger += rec.byChannel[ev.channel];
+        delete rec.byChannel[ev.channel];
+        rec.lines.forEach((l) => { if (l.channel === ev.channel) { l.channel = 'replaced'; l.replacedBy = ev.name; } });
+      });
+      const total = Object.values(leads).reduce((a, n) => a + n, 0);
+      Object.entries(leads).forEach(([m, n]) => {
+        const amt = ev.cost * n / total;
+        const rec = out[m] || (out[m] = { month: m, basis: 'actual', source: 'Event cost only', byChannel: {}, lines: [] });
+        rec.byChannel[ev.channel] = (rec.byChannel[ev.channel] || 0) + amt;
+        rec.lines.push({ label: `${ev.name} (true cost, by leads)`, channel: ev.channel, amount: amt, matched: true });
+      });
+      events.push(Object.assign({}, ev, { ledger, allocated: total > 0 }));
+    });
+    return { spendByMonth: out, events };
+  }
+
   // ---- deals → per-month, per-channel facts ----------------------------------
 
-  // deal: { id, name, created, closed, won, aspire, amount, source, sourceLabel, pipeline }
+  // deal: { id, name, created, closed, won, aspire, amount, source, sourceLabel, pipeline,
+  //         killed, lostReason, ... }
   // A "job" is a Closed Won deal with an Aspire Opportunity # filled in.
   const isJob = (d) => d.won && String(d.aspire || '').trim() !== '';
+
+  // Standards: no closed-revenue or return figure is judged before the lead cohort is 90 days
+  // old. A month matures 90 days after its last day.
+  const MATURITY_DAYS = 90;
+  function isMatured(month, asOf) {
+    const [y, m] = month.split('-').map(Number);
+    const end = new Date(y, m, 0); // last day of the month
+    return (new Date(asOf) - end) / 864e5 >= MATURITY_DAYS;
+  }
 
   // ---- summary for a period --------------------------------------------------
 
@@ -387,7 +443,10 @@
       return { d, ch: a.id, viaTraffic: a.viaTraffic, created: monthOf(d.created), closed: monthOf(d.closed), keep: matches(d) };
     });
 
-    const blank = () => ({ spend: 0, leads: 0, jobs: 0, revenue: 0, wonNoAspire: 0, viaTraffic: 0 });
+    const excludedIds = new Set(idx.channels.filter((c) => c.excluded).map((c) => c.id));
+    const asOf = opts.asOf || new Date();
+    const blank = () => ({ spend: 0, leads: 0, killed: 0, jobs: 0, revenue: 0, wonNoAspire: 0, viaTraffic: 0 });
+    let excludedSpend = 0;
     const byChannel = Object.fromEntries(idx.channels.map((c) => [c.id, blank()]));
     const byMonth = Object.fromEntries(months.map((m) => [m, blank()]));
     const total = blank();
@@ -420,6 +479,7 @@
       if (!rec) return;
       Object.entries(rec.byChannel).forEach(([id, amt]) => {
         const v = amt * spendShare(m, id);
+        if (excludedIds.has(id)) { excludedSpend += v; return; }
         if (!byChannel[id]) byChannel[id] = blank();
         byChannel[id].spend += v;
         byMonth[m].spend += v;
@@ -443,6 +503,7 @@
         byChannel[ch].leads++;
         byMonth[created].leads++;
         total.leads++;
+        if (d.killed) { byChannel[ch].killed++; byMonth[created].killed++; total.killed++; }
         if (viaTraffic) { byChannel[ch].viaTraffic++; total.viaTraffic++; }
       }
       if (d.won && inRange(revMonth)) {
@@ -460,6 +521,9 @@
 
     const derive = (r) => Object.assign(r, {
       cpl: r.spend ? safeDiv(r.spend, r.leads) : null,
+      // Qualified CPL: spend ÷ (leads − killed at phone).
+      qcpl: r.spend ? safeDiv(r.spend, r.leads - r.killed) : null,
+      killedRate: safeDiv(r.killed, r.leads),
       costPerJob: r.spend ? safeDiv(r.spend, r.jobs) : null,
       closeRate: safeDiv(r.jobs, r.leads),
       avgJob: safeDiv(r.revenue, r.jobs),
@@ -471,6 +535,12 @@
     Object.values(byMonth).forEach(derive);
     unattributed.share = safeDiv(unattributed.revenue, allRevenue);
 
+    // Return over matured lead months only (cohort basis), as the standards require.
+    const maturedMonths = months.filter((m) => isMatured(m, asOf));
+    const matured = { months: maturedMonths, spend: 0, revenue: 0 };
+    maturedMonths.forEach((m) => { matured.spend += byMonth[m].spend; matured.revenue += byMonth[m].revenue; });
+    matured.ret = opts.basis === 'closed' ? null : (matured.spend ? matured.revenue / matured.spend : null);
+
     const estimatedMonths = months.filter((m) => !spendByMonth[m] || spendByMonth[m].basis !== 'actual');
 
     return {
@@ -479,13 +549,47 @@
       byMonth,
       allocated,
       unattributed,
+      matured,
+      excludedSpend,
       channels: idx.channels
-        .filter((c) => opts.includeUnknown !== false || c.id !== unknownId)
+        .filter((c) => !c.excluded && (opts.includeUnknown !== false || c.id !== unknownId))
         .map((c) => Object.assign({ id: c.id, name: c.name, overhead: !c.leadSources }, byChannel[c.id])),
       spendByMonth,
       estimatedMonths,
       missingAspire: missingAspire.sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)),
     };
+  }
+
+  // Budget vs. actual per channel, over the months in range that have actual spend.
+  // Returns { channelId: { budget, actual } }. Empty when the workbook has no budget rows.
+  function budgetVsActual(workbook, spendByMonth, months, channels) {
+    const idx = makeChannelIndex(channels);
+    const out = {};
+    const actualMonths = months.filter((m) => spendByMonth[m] && spendByMonth[m].basis === 'actual');
+    ((workbook && workbook.budget) || []).forEach((r) => {
+      if (!actualMonths.includes(r.month) || !r.budget) return;
+      const id = idx.forItem(r.item);
+      (out[id] = out[id] || { budget: 0, actual: 0 }).budget += r.budget;
+    });
+    actualMonths.forEach((m) => Object.entries(spendByMonth[m].byChannel).forEach(([id, amt]) => {
+      if (out[id]) out[id].actual += amt;
+    }));
+    return out;
+  }
+
+  // Spend lines in range that no vendor / budget-item rule matched (they fall into the default channel).
+  function unmatchedSpend(spendByMonth, months) {
+    const out = [];
+    months.forEach((m) => ((spendByMonth[m] && spendByMonth[m].lines) || []).forEach((l) => {
+      if (l.matched === false) out.push({ label: vendorName(l.label), amount: l.amount });
+    }));
+    return out;
+  }
+
+  // "Google*Ads · Google ADSXXXX3258" → "Google*Ads"; picks the first part with letters.
+  function vendorName(text) {
+    const parts = String(text || '').split(/ · |,/).map((x) => x.trim()).filter((x) => /[a-z]{2}/i.test(x) && !/^\d/.test(x));
+    return parts[0] || String(text || '');
   }
 
   // One summary per service line (same period and filters), for the service line table.
@@ -546,6 +650,12 @@
     DEFAULT_SERVICE_LINES,
     makeLineIndex,
     summarizeServiceLines,
+    applyEventCosts,
+    isMatured,
+    MATURITY_DAYS,
+    budgetVsActual,
+    unmatchedSpend,
+    vendorName,
     parseMoney,
     monthOf,
     addMonths,
